@@ -1,0 +1,10 @@
+{
+  "id": "chrono-gantt",
+  "name": "Chrono Gantt",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Gantt chart viewer with sync from vault MD file properties.",
+  "author": "roypeco",
+  "authorUrl": "",
+  "isDesktopOnly": false
+}
