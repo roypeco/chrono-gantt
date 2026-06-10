@@ -23,8 +23,29 @@ status: in-progress
 ---
 ```
 
-- Files missing `start`, `end`, or with an invalid format are **skipped**
-- Files with an undefined or unrecognized `status` are also **skipped**
+- The start/end field names are configurable in plugin settings (defaults: `start` / `end`)
+- Files missing the start/end fields, or with an invalid format, are **skipped**
+- Files with an undefined or unrecognized `status` are also **skipped** (the `status` field name is fixed)
+
+### Parent / subtasks
+
+Setting the `parent` field (fixed field name) groups a task under its parent as a subtask.
+
+```yaml
+# Design.md (subtask)
+---
+start: 2026-06-01
+end: 2026-06-07
+status: done
+parent: Implement feature XXX   # parent task's file name (no extension); [[Implement feature XXX]] also accepted
+---
+```
+
+- The parent must be an MD file within the scan scope with a valid `status` (file names must be unique within the scan scope)
+- The parent's date range is **derived from its subtasks** (earliest start to latest end). The parent's own start/end are ignored when it has subtasks
+- If the `parent` reference does not resolve or is invalid, the task is treated as a normal standalone task
+- Nesting (subtasks of subtasks) is **not supported**; the `parent` field of a file that is itself referenced as a parent is ignored
+- A parent with no valid subtasks is shown as a standalone task if it has its own start/end, otherwise skipped
 
 ### Status values and colors
 
@@ -75,9 +96,24 @@ status: in-progress
 
 - A **red vertical line** marking the current date, always visible
 
+### Parent / subtask display
+
+```
+│ Feature XXX  │   █████████████                  │  ← parent (top of the group)
+│   Design     │   ████                           │  ← subtask
+│   Implement  │       ██████                     │  ← subtask
+│   Debug      │             ████                 │  ← subtask
+```
+
+- Within a group, the **parent bar sits at the top** with its subtasks listed below
+- Subtask names are indented; the parent name and bar label are bold
+- The parent bar has the same height as subtask bars (colored by the parent's own `status`)
+- The last subtask row has a thicker bottom border to separate groups
+
 ### Task sort order
 
-- Sorted by `start` date **ascending** (earliest at top)
+- Sorted by start date **ascending** (earliest at top)
+- Parent groups are ordered among other tasks by the parent's (derived) start date; subtasks within a group are also sorted by start date ascending
 
 ### Data refresh
 
@@ -105,3 +141,5 @@ status: in-progress
 | Setting | Default | Description |
 |---|---|---|
 | Scan directory | *(empty)* | Root folder of MD files to display in the Gantt chart |
+| Start date field name | `start` | Frontmatter field name for the start date. Falls back to the default when left empty |
+| End date field name | `end` | Frontmatter field name for the end date. Falls back to the default when left empty |

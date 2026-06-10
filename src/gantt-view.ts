@@ -1,6 +1,6 @@
 import { ItemView, TFile, WorkspaceLeaf } from 'obsidian';
 import { scanTasks } from './scanner';
-import type { PluginSettings, Task, TaskStatus, TimeScale } from './types';
+import type { PluginSettings, Task, TaskGroup, TaskStatus, TimeScale } from './types';
 
 export const GANTT_VIEW_TYPE = 'chrono-gantt-view';
 
@@ -38,7 +38,7 @@ function fmtDate(d: Date): string {
 }
 
 export class GanttView extends ItemView {
-  private tasks: Task[] = [];
+  private groups: TaskGroup[] = [];
   private scale: TimeScale = 'week';
 
   constructor(leaf: WorkspaceLeaf, private getSettings: () => PluginSettings) {
@@ -63,10 +63,10 @@ export class GanttView extends ItemView {
       return;
     }
 
-    this.tasks = scanTasks(this.app, settings.scanDir);
+    this.groups = scanTasks(this.app, settings.scanDir, settings.startField, settings.endField);
     this.renderToolbar(containerEl);
 
-    if (this.tasks.length === 0) {
+    if (this.groups.length === 0) {
       this.renderEmpty(containerEl, 'no-tasks', settings.scanDir);
       return;
     }
@@ -110,7 +110,9 @@ export class GanttView extends ItemView {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const allDates = this.tasks.flatMap(t => [t.start, t.end]);
+    const allDates = this.groups.flatMap(g =>
+      [g.parent, ...g.subtasks].flatMap(t => [t.start, t.end])
+    );
     const rangeStart = addDays(new Date(Math.min(...allDates.map(d => d.getTime()))), -PADDING_DAYS);
     const rangeEnd = addDays(new Date(Math.max(...allDates.map(d => d.getTime()))), PADDING_DAYS);
 
@@ -128,42 +130,69 @@ export class GanttView extends ItemView {
     headerRight.style.width = totalW + 'px';
     this.renderTimeHeader(headerRight, rangeStart, rangeEnd, ppd);
 
-    // Task rows
-    for (const task of this.tasks) {
-      const row = outer.createDiv('cg-row');
-
-      const nameCell = row.createDiv('cg-task-name');
-      nameCell.setText(task.file);
-      nameCell.title = task.file;
-
-      const chartCell = row.createDiv('cg-chart-cell');
-      chartCell.style.width = totalW + 'px';
-
-      // Today line (behind bars)
-      if (todayX >= 0 && todayX <= totalW) {
-        const todayLine = chartCell.createDiv('cg-today-line');
-        todayLine.style.left = todayX + 'px';
+    // Task rows — within a group, the parent bar comes first with subtasks below it
+    for (const group of this.groups) {
+      this.renderRow(
+        outer,
+        group.parent,
+        group.subtasks.length > 0 ? 'parent' : 'single',
+        rangeStart, ppd, totalW, todayX
+      );
+      let lastRow: HTMLElement | null = null;
+      for (const sub of group.subtasks) {
+        lastRow = this.renderRow(outer, sub, 'subtask', rangeStart, ppd, totalW, todayX);
       }
-
-      // Task bar
-      const left = daysBetween(rangeStart, task.start) * ppd;
-      const width = Math.max(daysBetween(task.start, task.end) * ppd, ppd / 2);
-      const bar = chartCell.createDiv('cg-bar');
-      bar.style.left = left + 'px';
-      bar.style.width = width + 'px';
-      bar.style.background = STATUS_COLOR[task.status];
-      bar.setText(task.file);
-      bar.title = `${task.file}\n${fmtDate(task.start)} 〜 ${fmtDate(task.end)}\n${task.status}`;
-      bar.onclick = () => {
-        const f = this.app.vault.getAbstractFileByPath(task.filePath);
-        if (f instanceof TFile) this.app.workspace.getLeaf(false).openFile(f);
-      };
+      lastRow?.addClass('cg-group-end');
     }
 
     // Scroll so today is visible (roughly centered in the timeline area)
     requestAnimationFrame(() => {
       outer.scrollLeft = Math.max(0, todayX - (outer.clientWidth - LEFT_W) / 2);
     });
+  }
+
+  private renderRow(
+    outer: HTMLElement,
+    task: Task,
+    kind: 'single' | 'subtask' | 'parent',
+    rangeStart: Date,
+    ppd: number,
+    totalW: number,
+    todayX: number
+  ): HTMLElement {
+    const row = outer.createDiv('cg-row');
+
+    const nameCell = row.createDiv('cg-task-name');
+    if (kind === 'subtask') nameCell.addClass('cg-subtask-name');
+    if (kind === 'parent') nameCell.addClass('cg-parent-name');
+    nameCell.setText(task.file);
+    nameCell.title = task.file;
+
+    const chartCell = row.createDiv('cg-chart-cell');
+    chartCell.style.width = totalW + 'px';
+
+    // Today line (behind bars)
+    if (todayX >= 0 && todayX <= totalW) {
+      const todayLine = chartCell.createDiv('cg-today-line');
+      todayLine.style.left = todayX + 'px';
+    }
+
+    // Task bar
+    const left = daysBetween(rangeStart, task.start) * ppd;
+    const width = Math.max(daysBetween(task.start, task.end) * ppd, ppd / 2);
+    const bar = chartCell.createDiv('cg-bar');
+    if (kind === 'parent') bar.addClass('cg-bar-parent');
+    bar.style.left = left + 'px';
+    bar.style.width = width + 'px';
+    bar.style.background = STATUS_COLOR[task.status];
+    bar.setText(task.file);
+    bar.title = `${task.file}\n${fmtDate(task.start)} 〜 ${fmtDate(task.end)}\n${task.status}`;
+    bar.onclick = () => {
+      const f = this.app.vault.getAbstractFileByPath(task.filePath);
+      if (f instanceof TFile) this.app.workspace.getLeaf(false).openFile(f);
+    };
+
+    return row;
   }
 
   private renderTimeHeader(el: HTMLElement, start: Date, end: Date, ppd: number) {

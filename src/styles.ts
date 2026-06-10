@@ -61,6 +61,7 @@ export const STYLES = `
   top: 0;
   z-index: 3;
   height: 40px;
+  min-width: max-content;
   background: var(--background-primary);
   border-bottom: 1px solid var(--background-modifier-border);
 }
@@ -101,6 +102,7 @@ export const STYLES = `
 /* ── Task rows ── */
 .cg-row {
   display: flex;
+  min-width: max-content;
   border-bottom: 1px solid var(--background-modifier-border);
 }
 .cg-task-name {
@@ -128,6 +130,17 @@ export const STYLES = `
   flex-shrink: 0;
 }
 
+/* ── Parent / subtask rows ── */
+.cg-subtask-name {
+  padding-left: 28px;
+}
+.cg-parent-name {
+  font-weight: 600;
+}
+.cg-group-end {
+  border-bottom: 2px solid var(--background-modifier-border);
+}
+
 /* ── Today line ── */
 .cg-today-line {
   position: absolute;
@@ -135,7 +148,7 @@ export const STYLES = `
   bottom: 0;
   width: 2px;
   background: rgba(239, 68, 68, 0.6);
-  z-index: 1;
+  z-index: 0;
   pointer-events: none;
 }
 
@@ -155,11 +168,14 @@ export const STYLES = `
   text-overflow: ellipsis;
   white-space: nowrap;
   box-sizing: border-box;
-  z-index: 2;
+  z-index: 1;
   user-select: none;
 }
 .cg-bar:hover {
   filter: brightness(1.12);
+}
+.cg-bar-parent {
+  font-weight: 600;
 }
 
 /* ── Empty state ── */

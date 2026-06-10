@@ -3,6 +3,8 @@ import type { PluginSettings } from './types';
 
 export const DEFAULT_SETTINGS: PluginSettings = {
   scanDir: '',
+  startField: 'start',
+  endField: 'end',
 };
 
 export class ChronoGanttSettingTab extends PluginSettingTab {
@@ -33,5 +35,30 @@ export class ChronoGanttSettingTab extends PluginSettingTab {
           })
       );
 
+    new Setting(containerEl)
+      .setName('開始日のフィールド名')
+      .setDesc('フロントマターで開始日を表すフィールド名（例: start, 開始日）')
+      .addText(text =>
+        text
+          .setPlaceholder('start')
+          .setValue(this.settings.startField)
+          .onChange(async value => {
+            this.settings.startField = value.trim() || 'start';
+            await this.save();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName('終了日のフィールド名')
+      .setDesc('フロントマターで終了日を表すフィールド名（例: end, 終了日）')
+      .addText(text =>
+        text
+          .setPlaceholder('end')
+          .setValue(this.settings.endField)
+          .onChange(async value => {
+            this.settings.endField = value.trim() || 'end';
+            await this.save();
+          })
+      );
   }
 }

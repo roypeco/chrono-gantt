@@ -15,6 +15,14 @@ export interface Task {
   status: TaskStatus;
 }
 
+// A parent task with its subtasks. Standalone tasks are groups with no subtasks.
+export interface TaskGroup {
+  parent: Task;
+  subtasks: Task[];
+}
+
 export interface PluginSettings {
   scanDir: string;
+  startField: string;
+  endField: string;
 }
