@@ -141,6 +141,7 @@ export function scanTasks(app: App, scanDir: string, startField: string, endFiel
     });
   }
 
-  groups.sort((a, b) => a.parent.start.getTime() - b.parent.start.getTime());
+  // Newest first
+  groups.sort((a, b) => b.parent.start.getTime() - a.parent.start.getTime());
   return groups;
 }

@@ -99,6 +99,27 @@ export const STYLES = `
   background: var(--background-secondary);
 }
 
+/* ── Load more ── */
+.cg-more-row {
+  position: sticky;
+  left: 0;
+  width: 200px;
+  padding: 8px 12px;
+}
+.cg-more-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.cg-more-btn:hover {
+  background: var(--background-modifier-hover);
+}
+
 /* ── Task rows ── */
 .cg-row {
   display: flex;
