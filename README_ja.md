@@ -99,3 +99,7 @@ docker compose run --rm dev npm run build
 ```bash
 docker compose run --rm dev npm run typecheck
 ```
+
+## コントリビュート
+
+バグ報告・機能の要望・PRを歓迎します。詳しくは [CONTRIBUTING_ja.md](CONTRIBUTING_ja.md) を参照してください。
