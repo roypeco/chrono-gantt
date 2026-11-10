@@ -1,6 +1,6 @@
 {
   "name": "chrono-gantt",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Obsidian Gantt chart plugin",
   "main": "main.js",
   "scripts": {
