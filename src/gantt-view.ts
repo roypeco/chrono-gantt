@@ -1,4 +1,4 @@
-import { ItemView, TFile, WorkspaceLeaf } from 'obsidian';
+import { ItemView, Notice, TFile, WorkspaceLeaf } from 'obsidian';
 import { scanTasks } from './scanner';
 import type { PluginSettings, Task, TaskGroup, TaskStatus, TimeScale } from './types';
 
@@ -9,6 +9,10 @@ const HEADER_H = 40;
 const LEFT_W = 200;
 const PADDING_DAYS = 7;
 const PAGE_SIZE = 15;
+// Pointer movement (px) before a press on a bar becomes a drag instead of a click
+const DRAG_THRESHOLD = 4;
+// Bars narrower than this (px) get no resize handles
+const MIN_RESIZE_W = 20;
 
 const PX_PER_DAY: Record<TimeScale, number> = {
   day: 40,
@@ -38,10 +42,41 @@ function fmtDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function fmtShort(d: Date): string {
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+// Keep the list form if Obsidian's properties UI stored the field as a list
+function setDateField(fm: Record<string, unknown>, key: string, d: Date) {
+  const cur = fm[key];
+  if (Array.isArray(cur) && cur.length > 0) cur[0] = fmtDate(d);
+  else fm[key] = fmtDate(d);
+}
+
+type RowKind = 'single' | 'subtask' | 'parent';
+type DragMode = 'move' | 'start' | 'end';
+
+interface DateUpdate {
+  task: Task;
+  start: Date;
+  end: Date;
+}
+
+interface RowContext {
+  outer: HTMLElement;
+  group: TaskGroup;
+  groupIndex: number;
+  rangeStart: Date;
+  ppd: number;
+  totalW: number;
+  todayX: number;
+}
+
 export class GanttView extends ItemView {
   private groups: TaskGroup[] = [];
   private scale: TimeScale = 'week';
   private visibleCount = PAGE_SIZE;
+  private saving = false;
 
   constructor(leaf: WorkspaceLeaf, private getSettings: () => PluginSettings) {
     super(leaf);
@@ -77,12 +112,17 @@ export class GanttView extends ItemView {
   }
 
   private loadMore() {
+    this.rerenderChart(() => { this.visibleCount += PAGE_SIZE; });
+  }
+
+  // Redraw only the chart, applying `mutate` first, without losing the scroll position
+  private rerenderChart(mutate: () => void) {
     const outer = this.containerEl.querySelector<HTMLElement>('.cg-outer');
     const prevTop = outer?.scrollTop ?? 0;
     const prevStart = this.visibleRangeStart();
     const prevLeft = outer?.scrollLeft ?? 0;
 
-    this.visibleCount += PAGE_SIZE;
+    mutate();
     outer?.remove();
     const next = this.renderChart(this.containerEl, false);
 
@@ -161,19 +201,15 @@ export class GanttView extends ItemView {
     this.renderTimeHeader(headerRight, rangeStart, rangeEnd, ppd);
 
     // Task rows — within a group, the parent bar comes first with subtasks below it
-    for (const group of groups) {
-      this.renderRow(
-        outer,
-        group.parent,
-        group.subtasks.length > 0 ? 'parent' : 'single',
-        rangeStart, ppd, totalW, todayX
-      );
+    groups.forEach((group, gi) => {
+      const ctx = { outer, group, groupIndex: gi, rangeStart, ppd, totalW, todayX };
+      this.renderRow(ctx, group.parent, group.subtasks.length > 0 ? 'parent' : 'single');
       let lastRow: HTMLElement | null = null;
       for (const sub of group.subtasks) {
-        lastRow = this.renderRow(outer, sub, 'subtask', rangeStart, ppd, totalW, todayX);
+        lastRow = this.renderRow(ctx, sub, 'subtask');
       }
       lastRow?.addClass('cg-group-end');
-    }
+    });
 
     const remaining = this.groups.length - groups.length;
     if (remaining > 0) {
@@ -194,15 +230,8 @@ export class GanttView extends ItemView {
     return outer;
   }
 
-  private renderRow(
-    outer: HTMLElement,
-    task: Task,
-    kind: 'single' | 'subtask' | 'parent',
-    rangeStart: Date,
-    ppd: number,
-    totalW: number,
-    todayX: number
-  ): HTMLElement {
+  private renderRow(ctx: RowContext, task: Task, kind: RowKind): HTMLElement {
+    const { outer, groupIndex, rangeStart, ppd, totalW, todayX } = ctx;
     const row = outer.createDiv('cg-row');
 
     const nameCell = row.createDiv('cg-task-name');
@@ -230,12 +259,150 @@ export class GanttView extends ItemView {
     bar.style.background = STATUS_COLOR[task.status];
     bar.setText(task.file);
     bar.title = `${task.file}\n${fmtDate(task.start)} 〜 ${fmtDate(task.end)}\n${task.status}`;
-    bar.onclick = () => {
-      const f = this.app.vault.getAbstractFileByPath(task.filePath);
-      if (f instanceof TFile) this.app.workspace.getLeaf(false).openFile(f);
-    };
+    bar.dataset.group = String(groupIndex);
+    // Parent ranges are derived from subtasks, so only leaf bars get resize handles.
+    // Very short bars skip them so there is still room to grab the bar itself.
+    if (kind !== 'parent' && width >= MIN_RESIZE_W) {
+      bar.createDiv('cg-bar-handle cg-bar-handle-start');
+      bar.createDiv('cg-bar-handle cg-bar-handle-end');
+    }
+    this.attachDrag(bar, task, kind, ctx);
 
     return row;
+  }
+
+  // Dragging the bar body moves the task by whole days (a parent bar moves all its subtasks);
+  // dragging an edge handle changes only the start or end date.
+  // A press without movement opens the file.
+  private attachDrag(bar: HTMLElement, task: Task, kind: RowKind, ctx: RowContext) {
+    bar.addEventListener('pointerdown', (e: PointerEvent) => {
+      if (e.button !== 0 || this.saving) return;
+      e.preventDefault();
+      bar.setPointerCapture(e.pointerId);
+
+      const target = e.target as HTMLElement;
+      const mode: DragMode = target.hasClass('cg-bar-handle-start')
+        ? 'start'
+        : target.hasClass('cg-bar-handle-end') ? 'end' : 'move';
+
+      const { outer, group, groupIndex, rangeStart, ppd } = ctx;
+      const moving = mode === 'move' && kind === 'parent'
+        ? Array.from(outer.querySelectorAll<HTMLElement>(`.cg-bar[data-group="${groupIndex}"]`))
+        : [bar];
+      const startX = e.clientX;
+      const origLeft = bar.style.left;
+      const origWidth = bar.style.width;
+      let dragging = false;
+      let days = 0;
+      let newStart = task.start;
+      let newEnd = task.end;
+      let tip: HTMLElement | null = null;
+
+      const reset = () => {
+        for (const b of moving) b.style.transform = '';
+        bar.style.left = origLeft;
+        bar.style.width = origWidth;
+        bar.removeClass('cg-bar-dragging');
+        tip?.remove();
+      };
+
+      const onMove = (ev: PointerEvent) => {
+        const dx = ev.clientX - startX;
+        if (!dragging) {
+          if (Math.abs(dx) < DRAG_THRESHOLD) return;
+          dragging = true;
+          bar.addClass('cg-bar-dragging');
+          tip = bar.parentElement!.createDiv('cg-drag-tip');
+        }
+        days = Math.round(dx / ppd);
+
+        if (mode === 'move') {
+          newStart = addDays(task.start, days);
+          newEnd = addDays(task.end, days);
+          for (const b of moving) b.style.transform = `translateX(${days * ppd}px)`;
+        } else {
+          // Never let the start pass the end (a same-day task is allowed)
+          if (mode === 'start') {
+            newStart = addDays(task.start, days);
+            if (newStart > task.end) newStart = task.end;
+          } else {
+            newEnd = addDays(task.end, days);
+            if (newEnd < task.start) newEnd = task.start;
+          }
+          bar.style.left = daysBetween(rangeStart, newStart) * ppd + 'px';
+          bar.style.width = Math.max(daysBetween(newStart, newEnd) * ppd, ppd / 2) + 'px';
+        }
+
+        if (tip) {
+          tip.style.left = daysBetween(rangeStart, newStart) * ppd + 'px';
+          tip.setText(`${fmtShort(newStart)} 〜 ${fmtShort(newEnd)}`);
+        }
+      };
+
+      const finish = (ev: PointerEvent) => {
+        bar.removeEventListener('pointermove', onMove);
+        bar.removeEventListener('pointerup', finish);
+        bar.removeEventListener('pointercancel', finish);
+        if (!dragging) {
+          if (ev.type === 'pointerup') this.openTask(task);
+          return;
+        }
+        const unchanged =
+          newStart.getTime() === task.start.getTime() && newEnd.getTime() === task.end.getTime();
+        if (ev.type === 'pointercancel' || unchanged) {
+          reset();
+          return;
+        }
+        const updates: DateUpdate[] = mode === 'move' && kind === 'parent'
+          ? group.subtasks.map(t => ({ task: t, start: addDays(t.start, days), end: addDays(t.end, days) }))
+          : [{ task, start: newStart, end: newEnd }];
+        this.saveDates(group, updates);
+      };
+
+      bar.addEventListener('pointermove', onMove);
+      bar.addEventListener('pointerup', finish);
+      bar.addEventListener('pointercancel', finish);
+    });
+  }
+
+  private openTask(task: Task) {
+    const f = this.app.vault.getAbstractFileByPath(task.filePath);
+    if (f instanceof TFile) this.app.workspace.getLeaf(false).openFile(f);
+  }
+
+  // Write the new dates to each file's frontmatter, then redraw.
+  // The row order is kept as-is until the next refresh so the changed task doesn't jump away.
+  private async saveDates(group: TaskGroup, updates: DateUpdate[]) {
+    const { startField, endField } = this.getSettings();
+    const saved: DateUpdate[] = [];
+    this.saving = true;
+    try {
+      for (const u of updates) {
+        const f = this.app.vault.getAbstractFileByPath(u.task.filePath);
+        if (!(f instanceof TFile)) throw new Error(`File not found: ${u.task.filePath}`);
+        await this.app.fileManager.processFrontMatter(f, fm => {
+          setDateField(fm, startField, u.start);
+          setDateField(fm, endField, u.end);
+        });
+        saved.push(u);
+      }
+    } catch (err) {
+      console.error('[chrono-gantt] failed to update dates', err);
+      new Notice('タスクの日付を更新できませんでした');
+    } finally {
+      this.saving = false;
+    }
+
+    this.rerenderChart(() => {
+      for (const u of saved) {
+        u.task.start = u.start;
+        u.task.end = u.end;
+      }
+      if (group.subtasks.length > 0) {
+        group.parent.start = new Date(Math.min(...group.subtasks.map(t => t.start.getTime())));
+        group.parent.end = new Date(Math.max(...group.subtasks.map(t => t.end.getTime())));
+      }
+    });
   }
 
   private renderTimeHeader(el: HTMLElement, start: Date, end: Date, ppd: number) {

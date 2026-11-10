@@ -199,6 +199,47 @@ export const STYLES = `
   font-weight: 600;
 }
 
+/* ── Drag to move ── */
+.cg-bar {
+  cursor: grab;
+  touch-action: none;
+}
+.cg-bar.cg-bar-dragging {
+  cursor: grabbing;
+  opacity: 0.85;
+  z-index: 3;
+  filter: none;
+}
+.cg-bar-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+.cg-bar-handle-start {
+  left: 0;
+}
+.cg-bar-handle-end {
+  right: 0;
+}
+.cg-bar:hover .cg-bar-handle {
+  background: rgba(255, 255, 255, 0.35);
+}
+.cg-drag-tip {
+  position: absolute;
+  top: -18px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--background-modifier-hover);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 5;
+}
+
 /* ── Empty state ── */
 .cg-empty {
   display: flex;
