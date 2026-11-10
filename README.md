@@ -99,3 +99,7 @@ docker compose run --rm dev npm run build
 ```bash
 docker compose run --rm dev npm run typecheck
 ```
+
+## Contributing
+
+Bug reports, feature requests, and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
