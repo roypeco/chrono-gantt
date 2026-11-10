@@ -8,6 +8,7 @@ const ROW_H = 36;
 const HEADER_H = 40;
 const LEFT_W = 200;
 const PADDING_DAYS = 7;
+const PAGE_SIZE = 15;
 
 const PX_PER_DAY: Record<TimeScale, number> = {
   day: 40,
@@ -40,6 +41,7 @@ function fmtDate(d: Date): string {
 export class GanttView extends ItemView {
   private groups: TaskGroup[] = [];
   private scale: TimeScale = 'week';
+  private visibleCount = PAGE_SIZE;
 
   constructor(leaf: WorkspaceLeaf, private getSettings: () => PluginSettings) {
     super(leaf);
@@ -74,6 +76,33 @@ export class GanttView extends ItemView {
     this.renderChart(containerEl);
   }
 
+  private loadMore() {
+    const outer = this.containerEl.querySelector<HTMLElement>('.cg-outer');
+    const prevTop = outer?.scrollTop ?? 0;
+    const prevStart = this.visibleRangeStart();
+    const prevLeft = outer?.scrollLeft ?? 0;
+
+    this.visibleCount += PAGE_SIZE;
+    outer?.remove();
+    const next = this.renderChart(this.containerEl, false);
+
+    // Keep the same dates in view even if the timeline range grew to the left
+    const shift = daysBetween(this.visibleRangeStart(), prevStart) * PX_PER_DAY[this.scale];
+    next.scrollTop = prevTop;
+    next.scrollLeft = prevLeft + shift;
+  }
+
+  private visibleGroups(): TaskGroup[] {
+    return this.groups.slice(0, this.visibleCount);
+  }
+
+  private visibleRangeStart(): Date {
+    const times = this.visibleGroups().flatMap(g =>
+      [g.parent, ...g.subtasks].map(t => t.start.getTime())
+    );
+    return addDays(new Date(Math.min(...times)), -PADDING_DAYS);
+  }
+
   private renderToolbar(el: HTMLElement) {
     const bar = el.createDiv('cg-toolbar');
 
@@ -106,14 +135,15 @@ export class GanttView extends ItemView {
     }
   }
 
-  private renderChart(el: HTMLElement) {
+  private renderChart(el: HTMLElement, scrollToToday = true): HTMLElement {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const allDates = this.groups.flatMap(g =>
+    const groups = this.visibleGroups();
+    const allDates = groups.flatMap(g =>
       [g.parent, ...g.subtasks].flatMap(t => [t.start, t.end])
     );
-    const rangeStart = addDays(new Date(Math.min(...allDates.map(d => d.getTime()))), -PADDING_DAYS);
+    const rangeStart = this.visibleRangeStart();
     const rangeEnd = addDays(new Date(Math.max(...allDates.map(d => d.getTime()))), PADDING_DAYS);
 
     const ppd = PX_PER_DAY[this.scale];
@@ -131,7 +161,7 @@ export class GanttView extends ItemView {
     this.renderTimeHeader(headerRight, rangeStart, rangeEnd, ppd);
 
     // Task rows — within a group, the parent bar comes first with subtasks below it
-    for (const group of this.groups) {
+    for (const group of groups) {
       this.renderRow(
         outer,
         group.parent,
@@ -145,10 +175,23 @@ export class GanttView extends ItemView {
       lastRow?.addClass('cg-group-end');
     }
 
+    const remaining = this.groups.length - groups.length;
+    if (remaining > 0) {
+      const moreRow = outer.createDiv('cg-more-row');
+      const btn = moreRow.createEl('button', {
+        text: `さらに読み込む（残り ${remaining} 件）`,
+        cls: 'cg-more-btn',
+      });
+      btn.onclick = () => this.loadMore();
+    }
+
     // Scroll so today is visible (roughly centered in the timeline area)
-    requestAnimationFrame(() => {
-      outer.scrollLeft = Math.max(0, todayX - (outer.clientWidth - LEFT_W) / 2);
-    });
+    if (scrollToToday) {
+      requestAnimationFrame(() => {
+        outer.scrollLeft = Math.max(0, todayX - (outer.clientWidth - LEFT_W) / 2);
+      });
+    }
+    return outer;
   }
 
   private renderRow(
